@@ -1,71 +1,74 @@
-# BattleShips:OverEngineered
+# BattleShips: OverEngineered
 
-Goal is overengineer battleships as much as possible.
-Let implement it step by step.
-No AI slop, just artisian handcrafted hell of code.
+Overengineer Battleships on purpose. Build it one layer at a time.
+No AI slop. Handcrafted code, each layer there so you learn the tool under it.
 
+The point is to practice Python and C on one small game. A playable board comes before the circus.
 
-# Core logic:
-Fog of War (Anti-Cheat): The server sends the bot only a map segment corresponding to the spot range of its surviving ships. Any attempt to interact with an invisible target is immediately and mercilessly dropped at the TCP layer.
+## Game rules
 
-Transactional Economy: Strict turn-based rate limiting is introduced. Every incoming binary command (move/attack) must pass a Resources budget validation before the server even allows it to reach the game core.
+The server owns the board. The client sees only what its ships can see, and every command spends a budget.
 
-Ship Asymmetry (OOP Magic):
+- **Fog of war.** The server sends the bot only the map segment inside the spot range of its surviving ships. A command aimed at an invisible target is dropped on the TCP connection before it reaches the game.
+- **Turn budget.** The game is strictly turn-based. Each binary command (move or attack) must pass a resource check before the server lets it into the game core.
+- **Light ships.** High mobility, low damage, short firing range, medium spot range.
+- **Heavy ships.** Slow, expensive vector movement, long firing and spot range, high damage.
+- **Area of effect.** A heavy shot can hit several tiles at once (for example a 3×3). That scan runs in C through `ctypes`: a bitmask over the board, then only the affected targets come back to Python.
+- **Vector movement.** Ships move. The server walks the path point by point and rejects a move that leaves the map or hits another ship.
 
-Light Ships: High mobility, low damage and firing range, medium spot range.
+## Testing
 
-Heavy Ships: Slow and expensive vector movement, extreme firing and spotting range, massive damage.
+A layer is done when `pytest` is green, not when the code ran once by hand.
 
-Area of Effect (AoE via C-Extensions): A heavy ship's shot that damages multiple tiles at once (e.g., a 3x3 grid) will be offloaded from Python to a C library via ctypes. It will execute an instant bitmask operation over the memory space and return only the affected targets.
+- Test pure logic without a socket: packets, ship stats, fog, budget, movement.
+- A malformed packet raises a Python exception. An illegal move does too.
+- C returns an integer code. Python turns that code into the exception. The C function does not abort the process.
 
-Vector Movement & Collisions: Ships are no longer static. The backend must trace the movement path point-by-point and verify collisions with the map boundaries and other vessels (a perfect use case for lightning-fast Bloom Filters).
+## Build order
 
-# Impementation Plan: 
-Low-Level I/O & Memory Management
+Each layer assumes the previous one works. Do not start a layer until the previous one is tested.
 
-[ ] Raw TCP Stream: Receiving data via recv(1) and manually stitching fragmented packets.
+### 0. Bytes on the wire
 
-[ ] Ring Buffer: Fixed memory allocation with rotating manual read/write pointers.
+- [ ] Binary protocol: `struct` only. No strings, no JSON. One packet you can encode and decode in a test.
+- [ ] Tests for that codec: round-trip, truncated buffer, unknown message type.
+- [ ] A malformed packet raises. It is not skipped.
+- [ ] Raw TCP stream: `recv` in small pieces and stitch fragmented packets by hand.
+- [ ] Ring buffer: fixed memory, rotating read and write pointers.
+- [ ] Zero-copy: once the copying version works, keep the bytes in a `memoryview`.
+- [ ] C library: one header, one `.c` file, a build command, called through `ctypes`. The first function is a checksum over the packet bytes. It returns `0` or an error code.
 
-[ ] Zero-Copy Manipulation: Handling network bytes exclusively via memoryview to eliminate dynamic allocation overhead.
+### 1. A game that can take a turn
 
-[ ] Binary Serialization: Custom protocol handled strictly by the struct module (no strings or JSON).
+- [ ] State machine: Handshake → Cipher → Battle → Terminate. No other transitions.
+- [ ] Ships as objects: light and heavy, with the stats from the rules above.
+- [ ] One legal turn: place, move, or fire, then the other side.
+- [ ] An illegal turn raises. Tests cover one legal turn and one rejected turn.
 
-Architecture & Security
+### 2. Rules that make it Battleships
 
-[ ] Strict State Machine: Exact control over connection transitions (Handshake -> Cipher -> Battle -> Terminate).
+- [ ] Fog of war: responses contain only tiles inside the spot range.
+- [ ] Turn budget: reject a command that does not fit the remaining resources.
+- [ ] Vector movement: walk the path, stop on the map edge or another ship.
+- [ ] Tests for fog, an over-budget command, a path that leaves the map, and a path that hits a ship.
 
-[ ] Custom "Dirty" Cryptography: Bitwise operations, rotating XOR keys, and primitive Diffie-Hellman key exchange.
+### 3. Speed where it matters
 
-[ ] Application-Level Network Control: Custom ping/pong heartbeats and application-level ACK confirmations (Sliding Window).
+- [ ] Same C library, second function: which tiles sit in a 3×3. Python maps the return code to hits or an exception.
+- [ ] Tests call that function with a known board.
+- [ ] Bloom filter: O(1) check of whether a tile was already fired on. Test a hit, a miss, and a false positive.
 
-[ ] Merkle Trees: Anti-cheat cryptographic hash verification of the client's and server's game matrices.
+### 4. Later
 
-Concurrency & Performance
+These stay in the plan. They do not block the first playable game.
 
-[ ] Custom Event Loop (Reactor): Non-blocking I/O loop built entirely on select/epoll and yield generators (boycotting asyncio).
-
-[ ] Multiprocessing with IPC: Bypassing the GIL by spawning processes that communicate via shared memory (mmap) or Pipes.
-
-[ ] Object Pooling: Manual recycling of game instances to limit Garbage Collector interventions.
-
-[ ] Bloom Filters: Probabilistic data structures for lightning-fast O(1) lookups of your shooting history.
-
-Absolute Over-Engineering (Python Magic)
-
-[ ] Event Sourcing & WAL (Write-Ahead Logging): The game doesn't save the final state; it calculates the matrix in real-time by replaying an append-only binary event log.
-
-[ ] C-Extensions (ctypes): Rewriting the heaviest computational or cryptographic logic into a compiled C library and calling it from Python.
-
-[ ] Python Data Model: Deploying descriptors (__get__, __set__) for low-level matrix validation and metaclasses for dynamic ship generation.
-
-[ ] Hot-Reloading (importlib): Modifying game rules and weapon stats at runtime without dropping active client connections.
-
-[ ] AST Sandbox: Safe compilation of client macros (mini-scripts) by parsing them into an Abstract Syntax Tree and filtering out malicious commands.
-
-[ ] Python Datový Model: Nasazení descriptorů (__get__, __set__) pro nízkoúrovňovou validaci matice a metatříd pro generování lodí.
-
-[ ] Hot-Reloading (importlib): Úprava pravidel a statů zbraní za plného běhu serveru bez rozpojení klientů.
-
-[ ] AST Sandbox: Bezpečná kompilace klientských maker (mini-skriptů) jejich rozsekáním na abstraktní syntaktický strom.
-
+- [ ] Application-level ping/pong and ACK with a sliding window.
+- [ ] Custom crypto: rotating XOR and a small Diffie–Hellman exchange.
+- [ ] Merkle tree over the client and server boards, so the two matrices can be compared.
+- [ ] Custom event loop on `select` / `epoll` and generators. No `asyncio`.
+- [ ] Multiprocessing and IPC (`mmap` or pipes) to step around the GIL.
+- [ ] Object pool for game instances, so the garbage collector stays quiet.
+- [ ] Event sourcing: append-only binary log, board rebuilt by replay.
+- [ ] Descriptors (`__get__`, `__set__`) for board checks, metaclasses for ship types.
+- [ ] Hot reload (`importlib`): change weapon stats without dropping clients.
+- [ ] AST sandbox: client macros parsed to a tree, unsafe nodes rejected.
