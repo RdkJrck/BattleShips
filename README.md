@@ -9,12 +9,14 @@ The point is to practice Python and C on one small game. A playable board comes 
 
 The server owns the board. The client sees only what its ships can see, and every command spends a budget.
 
+- **Scale & MGRS.** One grid tile is `10 m × 10 m`. The UI displays and accepts MGRS coordinates, and every firing solution reports **azimuth** (0–360°) and **distance** in meters.
+- **Terrain & elevation.** The map has a terrain layer (`0` = sea level, `> 0` = island height). Light ships fire on a flat trajectory and cannot shoot over hills; heavy ships have a higher firing arc.
+- **Hull damage & sinking.** On the board, `+ship_id` marks an intact hull segment and `-ship_id` marks a damaged segment of that ship. A ship's mobility scales down as it takes hits, and if more than **50%** of its hull segments are hit, the entire ship sinks.
 - **Fog of war.** The server sends the bot only the map segment inside the spot range of its surviving ships. A command aimed at an invisible target is dropped on the TCP connection before it reaches the game.
 - **Turn budget.** The game is strictly turn-based. Each binary command (move or attack) must pass a resource check before the server lets it into the game core.
-- **Light ships.** High mobility, low damage, short firing range, medium spot range.
-- **Heavy ships.** Slow, expensive vector movement, long firing and spot range, high damage.
-- **Area of effect.** A heavy shot can hit several tiles at once (for example a 3×3). That scan runs in C through `ctypes`: a bitmask over the board, then only the affected targets come back to Python.
-- **Vector movement.** Ships move. The server walks the path point by point and rejects a move that leaves the map or hits another ship.
+- **Ship tiers (Scout, Frigate, Destroyer).** Scout: small (`1×2`), fast, long spot range, single-tile shot. Frigate: medium (`2×3`), medium blast radius. Destroyer: heavy (`3×5`), slow, expensive movement, large Euclidean blast radius.
+- **Area of effect.** A heavy shot hits all tiles inside its Euclidean blast radius. Later, that scan runs in C through `ctypes` over the board buffer.
+- **Vector movement.** Ships move. The server walks the path point by point and rejects a move that leaves the map, hits an island, or collides with another ship.
 
 ## Testing
 
